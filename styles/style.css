@@ -1,0 +1,44 @@
+.container {
+    /* TODO - make this scalable */
+    width: 800px;
+    height: 600px;
+    display: grid;
+    /* grid-template-columns: 15% 1fr; */
+    background-color: #2196F3;
+    padding: 10px;
+    gap: 10px;
+    grid-template-areas:
+        "channel-list chat-log chat-log chat-log chat-log"
+        "channel-list login-box chat-box chat-box chat-box";
+    grid-template-columns: 15% 15%;
+    grid-template-rows: 90%;
+}
+
+/* TODO - figure out what this does */
+.container > div {
+    background-color: rgba(255,255,255,0.8);
+    text-align: center;
+    padding: 5px 0;
+}
+
+.channel-list {
+    grid-area: channel-list;
+}
+
+.chat-log {
+    grid-area: chat-log;
+}
+
+/* has the user name if logged in, otherwise a login button */
+.login-box {
+    grid-area: login-box;
+}
+/* The user input section for user messages */
+.chat-box {
+    grid-area: chat-box;
+}
+
+.header {}
+.footer {}
+
+/* TODO use state-based styling to change the appearance of the login button */
