@@ -1,0 +1,84 @@
+.App {
+  text-align: center;
+}
+
+.App-logo {
+  height: 40vmin;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 20s linear;
+  }
+}
+
+.App-header {
+  background-color: #282c34;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: white;
+}
+
+.App-link {
+  color: #61dafb;
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.app-ui {
+  /* TODO - make this scalable */
+  width: 800px;
+  height: 600px;
+  display: grid;
+  /* grid-template-columns: 15% 1fr; */
+  background-color: #2196F3;
+  padding: 10px;
+  gap: 10px;
+  grid-template-areas:
+        "channel-list chat-log chat-log chat-log chat-log"
+        "channel-list login-box chat-box chat-box chat-box";
+  grid-template-columns: 15% 15%;
+  grid-template-rows: 90%;
+}
+
+/* TODO - figure out what this does */
+.app-ui > div {
+  background-color: rgba(255,255,255,0.8);
+  text-align: center;
+  padding: 5px 0;
+}
+
+.channel-list {
+  grid-area: channel-list;
+}
+
+.chat-log {
+  grid-area: chat-log;
+}
+
+/* has the user name if logged in, otherwise a login button */
+.login-box {
+  grid-area: login-box;
+}
+
+/* The user input section for user messages */
+.chat-box {
+  grid-area: chat-box;
+}
+
+.header {}
+.footer {}
+
+/* TODO use state-based styling to change the appearance of the login button */
