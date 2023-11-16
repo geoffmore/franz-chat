@@ -11,13 +11,37 @@ services:
   #  #env_file:
   #  #  -
   #  ports:
-  #    - "8080:8080"
+  #    - "127.0.0.1:8080:8080"
+  grafana-agent:
+    container_name: grafana-agent
+    image: grafana/agent:v0.37.4
+    environment:
+      AGENT_MODE: flow
+    env_file:
+      - .env
+    command:
+      # - /bin/grafana-agent
+      - run
+      - /etc/agent/config.river
+      - --storage.path=/tmp/agent
+      - --server.http.listen-addr=0.0.0.0:80
+      - --server.http.ui-path-prefix=/
+      - --disable-reporting
+    ports:
+      - "127.0.0.1:4317:4317" # otlp-grpc
+      - "127.0.0.1:12345:80" # http server
+    volumes:
+      - type: bind
+        source: ./grafana-agent/config.river
+        target: /etc/agent/config.river
+
+      # -disable-reporting
   kafka: # https://github.com/bitnami/containers/blob/main/bitnami/kafka/README.md
     image: docker.io/bitnami/kafka:3.5
     container_name: kafka
     restart: unless-stopped
     ports:
-      - "9094:9094"
+      - "127.0.0.1:9094:9094"
     volumes:
       - "kafka_data:/bitnami/"
     environment:
@@ -33,7 +57,7 @@ services:
     image: docker.io/bitnami/postgresql:16
     container_name: postgresql
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - 'postgresql_data:/bitnami/postgresql'
     environment:

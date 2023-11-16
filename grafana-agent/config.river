@@ -1,0 +1,57 @@
+// Receive Jaeger spans
+otelcol.receiver.jaeger "default" {
+  protocols {
+    grpc {} // 14250/TCP
+    thrift_http {} // 14268/TCP
+    thrift_binary {} // 6832/UDP
+    thrift_compact {} // 6831/UDP
+  }
+
+  debug_metrics {
+    disable_high_cardinality_metrics = true
+  }
+
+  output {
+    traces = [otelcol.processor.attributes.default.input]
+  }
+}
+
+otelcol.receiver.otlp "default" {
+  grpc {} // 4317/TCP
+  http {} // 4318/TCP
+
+  debug_metrics {
+    disable_high_cardinality_metrics = true
+  }
+
+  output {
+    traces = [otelcol.processor.attributes.default.input]
+  }
+}
+
+otelcol.processor.attributes "default" {
+  output {
+    traces = [otelcol.exporter.otlp.default.input]
+  }
+}
+
+otelcol.auth.basic "default" {
+  username = env("TEMPO_USER")
+  password = env("TEMPO_PASSWORD")
+}
+
+otelcol.exporter.otlp "default" {
+  client {
+    endpoint = env("TEMPO_URL")
+    auth = otelcol.auth.basic.default.handler
+
+    tls {
+      insecure = false
+      insecure_skip_verify = false
+    }
+  }
+
+  debug_metrics {
+    disable_high_cardinality_metrics = true
+  }
+}
