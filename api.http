@@ -1,0 +1,25 @@
+# TODO - use an openapi spec to generate requests instead
+
+### Create channel endpoint
+POST {{franz-api}}/create-channel
+Content-Type: application/json
+
+{
+  "channel": "{{$random.alphanumeric(10)}}"
+}
+
+### Chat endpoint
+POST {{franz-api}}/chat
+Content-Type: application/json
+
+{
+  "channel": "channel",
+  "msg": "[test] message generated at {{$timestamp}}!"
+}
+
+### Does not exist
+POST {{franz-api}}/dne
+
+### No body
+
+POST {{franz-api}}/chat

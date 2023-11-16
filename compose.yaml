@@ -1,4 +1,17 @@
+# https://docs.docker.com/compose/compose-file/03-compose-file/
 services:
+  #api:
+  #  container_name: api
+  #  #env_file:
+  #  #  -
+  #  ports:
+  #    - "8008:8080" # host:container
+  #web:
+  #  container_name: web
+  #  #env_file:
+  #  #  -
+  #  ports:
+  #    - "8080:8080"
   kafka: # https://github.com/bitnami/containers/blob/main/bitnami/kafka/README.md
     image: docker.io/bitnami/kafka:3.5
     container_name: kafka
