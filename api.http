@@ -8,7 +8,9 @@ Content-Type: application/json
   "channel": "{{$random.alphanumeric(10)}}"
 }
 
+
 ### Chat endpoint
+# TODO - make this run in parallel
 POST {{franz-api}}/chat
 Content-Type: application/json
 

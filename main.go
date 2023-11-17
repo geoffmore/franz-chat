@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/IBM/sarama"
+	"github.com/dnwe/otelsarama"
 	"github.com/jackc/pgx/v5"
 	"github.com/peterbourgon/ff/v3"
+	"go.opentelemetry.io/otel"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"io"
 	"log"
@@ -43,7 +46,7 @@ func (h *getMessagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	var (
-		a                  app
+		a                  = newApp()
 		kafkaConnection    = flag.String("kafka.connection", "localhost:9094", "Kafka connection string")
 		postgresConnection = flag.String("postgres.connection", "postgresql://franz_api:franz_api@localhost:5432/franz?application_name=franz_api", "Postgres connection")
 		port               = flag.Int("port", 8008, "Listen port")
@@ -68,7 +71,7 @@ func main() {
 	a.pgPool = newPostgresConnPool(postgresConnection)
 
 	defer func() {
-		if err := (&a).Close(); err != nil {
+		if err := a.Close(); err != nil {
 			log.Println("failed to close server connections")
 		}
 	}()
@@ -136,8 +139,6 @@ func (h *postChatMessageHandler) Handle(w http.ResponseWriter, r *http.Request) 
 	ctx, span := h.tracer.Start(r.Context(), "postChatMessageHandler")
 	defer span.End()
 
-	_ = ctx
-
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Println("unable to read body")
@@ -146,7 +147,7 @@ func (h *postChatMessageHandler) Handle(w http.ResponseWriter, r *http.Request) 
 		log.Println("unable to unmarshal json body")
 	}
 	// TODO - determine why only the first call to this handler produces a message in Kafka
-	produceMessage(h.producer,
+	produceMessage(ctx, h.producer,
 		&sarama.ProducerMessage{
 			Topic: chatTopic,
 			Value: sarama.StringEncoder(postChatRequest.Msg),
@@ -217,8 +218,11 @@ func renameChannel() {}
 
 // The user who creates the channel is marked in the channels table under the admin field. That field allows that user to rename the channel for everyone
 
-func produceMessage(p sarama.AsyncProducer, message *sarama.ProducerMessage) error {
-
-	p.Input() <- message
+func produceMessage(ctx context.Context, p sarama.AsyncProducer, msg *sarama.ProducerMessage) error {
+	// https://github.com/dnwe/otelsarama/blob/main/example/producer/producer.go
+	if true { // Lock this behind otel enabled feature flag
+		otel.GetTextMapPropagator().Inject(ctx, otelsarama.NewProducerMessageCarrier(msg))
+	}
+	p.Input() <- msg
 	return nil
 }
