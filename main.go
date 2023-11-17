@@ -64,9 +64,8 @@ func main() {
 	}
 
 	// Init stateful connections
-	kafkaClient := newKafkaClient(kafkaConnection)
-	a.kafkaAsyncProducer = newKafkaAsyncProducer(kafkaClient)
-	a.kafkaConsumerGroup = newKafkaConsumerGroup(kafkaClient, appName)
+	a.kafkaAsyncProducer = newKafkaAsyncProducer(kafkaConnection)
+	// a.kafkaConsumerGroup = newKafkaConsumerGroup(kafkaConnection, appName)
 	a.postgresClient = newPostgresClient(postgresConnection)
 	a.pgPool = newPostgresConnPool(postgresConnection)
 

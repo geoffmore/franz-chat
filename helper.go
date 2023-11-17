@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log"
 	"strings"
+	"time"
 )
 
 func newPostgresClient(postgresConnection *string) *pgx.Conn {
@@ -30,25 +31,26 @@ func newPostgresConnPool(pgConn *string) *pgxpool.Pool {
 	return pool
 }
 
-func newKafkaClient(kafkaConnection *string) sarama.Client {
-	kafkaClientConfig := sarama.NewConfig()
-
+func newKafkaAsyncProducer(conn *string) sarama.AsyncProducer {
 	// See https://github.com/IBM/sarama/blob/main/examples/http_server/http_server.go
-	kafkaClient, err := sarama.NewClient(strings.Split(*kafkaConnection, ","), kafkaClientConfig)
+
+	config := sarama.NewConfig()
+	// Async Settings
+	config.Producer.RequiredAcks = sarama.WaitForLocal       // Only wait for the leader to ack
+	config.Producer.Compression = sarama.CompressionSnappy   // Compress messages
+	config.Producer.Flush.Frequency = 500 * time.Millisecond // Flush batches every 500ms
+
+	c, err := sarama.NewClient(strings.Split(*conn, ","), config)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return kafkaClient
-}
-
-func newKafkaAsyncProducer(c sarama.Client) sarama.AsyncProducer {
 
 	producer, err := sarama.NewAsyncProducerFromClient(c)
 	if err != nil {
 		log.Fatal(err)
 	}
 	// TODO - lock this behind a feature flag
-	// https://github.com/IBM/sarama/issues/2510:w
+	// https://github.com/IBM/sarama/issues/2510
 	if true {
 		producer = otelsarama.WrapAsyncProducer(c.Config(), producer)
 	}
