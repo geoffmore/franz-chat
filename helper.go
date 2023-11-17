@@ -32,7 +32,6 @@ func newPostgresConnPool(pgConn *string) *pgxpool.Pool {
 
 func newKafkaClient(kafkaConnection *string) sarama.Client {
 	kafkaClientConfig := sarama.NewConfig()
-	kafkaClientConfig.Producer.Return.Successes = true // Necessary for SyncProducer
 
 	// See https://github.com/IBM/sarama/blob/main/examples/http_server/http_server.go
 	kafkaClient, err := sarama.NewClient(strings.Split(*kafkaConnection, ","), kafkaClientConfig)
@@ -40,19 +39,6 @@ func newKafkaClient(kafkaConnection *string) sarama.Client {
 		log.Fatal(err)
 	}
 	return kafkaClient
-}
-
-func newKafkaSyncProducer(c sarama.Client) sarama.SyncProducer {
-	producer, err := sarama.NewSyncProducerFromClient(c)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() {
-		if err := producer.Close(); err != nil {
-			log.Fatal(err)
-		}
-	}()
-	return producer
 }
 
 func newKafkaAsyncProducer(c sarama.Client) sarama.AsyncProducer {

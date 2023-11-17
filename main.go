@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/peterbourgon/ff/v3"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/semconv/v1.13.0/httpconv"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"io"
 	"log"
@@ -64,7 +65,6 @@ func main() {
 
 	// Init stateful connections
 	kafkaClient := newKafkaClient(kafkaConnection)
-	a.kafkaSyncProducer = newKafkaSyncProducer(kafkaClient)
 	a.kafkaAsyncProducer = newKafkaAsyncProducer(kafkaClient)
 	a.kafkaConsumerGroup = newKafkaConsumerGroup(kafkaClient, appName)
 	a.postgresClient = newPostgresClient(postgresConnection)
@@ -136,7 +136,14 @@ type postChatMessageHandler struct {
 
 func (h *postChatMessageHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var postChatRequest PostChatRequest
-	ctx, span := h.tracer.Start(r.Context(), "postChatMessageHandler")
+	// TODO - rename spanName to "method http.route" to conform with spec
+	/* TODO - figure out how to conform to https://opentelemetry.io/docs/specs/semconv/http/http-spans/ while also
+	moving away from the deprecated httpconv (https://github.com/open-telemetry/opentelemetry-go/releases/tag/v1.17.0)
+	*/
+	ctx, span := h.tracer.Start(r.Context(), "postChatMessageHandler",
+		oteltrace.WithSpanKind(oteltrace.SpanKindServer),
+		oteltrace.WithAttributes(httpconv.ServerRequest("", r)...),
+	)
 	defer span.End()
 
 	body, err := io.ReadAll(r.Body)
@@ -146,7 +153,6 @@ func (h *postChatMessageHandler) Handle(w http.ResponseWriter, r *http.Request) 
 	if err := json.Unmarshal(body, &postChatRequest); err != nil {
 		log.Println("unable to unmarshal json body")
 	}
-	// TODO - determine why only the first call to this handler produces a message in Kafka
 	produceMessage(ctx, h.producer,
 		&sarama.ProducerMessage{
 			Topic: chatTopic,
