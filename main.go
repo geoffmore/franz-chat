@@ -8,6 +8,7 @@ import (
 	"github.com/IBM/sarama"
 	"github.com/dnwe/otelsarama"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/peterbourgon/ff/v3"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/semconv/v1.13.0/httpconv"
@@ -105,14 +106,19 @@ func main() {
 	mux.HandleFunc("/login",
 		(&loginHandler{postgresClient: a.postgresClient}).Handle,
 	)
+	// TODO - maybe make this "/create-channel/:channel" to work with a route
 	mux.HandleFunc("/create-channel",
-		(&createChannelHandler{postgresClient: a.postgresClient}).Handle,
+		(&createChannelHandler{
+			pgPool: a.pgPool,
+			tracer: a.tracer,
+		}).Handle,
 	)
-	/*
-		mux.HandleFunc("/create-user",
-			createUserHandler{postgresClient: a.postgresClient}.Handle,
-		)
-	*/
+	mux.HandleFunc("/create-user",
+		(&createUserHandler{
+			pgPool: a.pgPool,
+			tracer: a.tracer,
+		}).Handle,
+	)
 
 	// JSON or request params?
 	// What if I have a func DoSomething(ctx context.Context, arg Arg) http.Handler? So I can access variables with my handlers as needed?
@@ -139,7 +145,8 @@ func (h *postChatMessageHandler) Handle(w http.ResponseWriter, r *http.Request) 
 	/* TODO - figure out how to conform to https://opentelemetry.io/docs/specs/semconv/http/http-spans/ while also
 	moving away from the deprecated httpconv (https://github.com/open-telemetry/opentelemetry-go/releases/tag/v1.17.0)
 	*/
-	ctx, span := h.tracer.Start(r.Context(), "postChatMessageHandler",
+	// TODO - figure out how to separate a route from a path (route should not be rendered as path)
+	ctx, span := h.tracer.Start(r.Context(), fmt.Sprintf("%s %s", r.Method, r.URL.Redacted()),
 		oteltrace.WithSpanKind(oteltrace.SpanKindServer),
 		oteltrace.WithAttributes(httpconv.ServerRequest("", r)...),
 	)
@@ -170,15 +177,11 @@ type loginHandler struct {
 func (h *loginHandler) Handle(w http.ResponseWriter, r *http.Request) {}
 
 type createChannelHandler struct {
-	postgresClient *pgx.Conn
+	pgPool *pgxpool.Pool
+	tracer oteltrace.Tracer
 }
 
 func (h *createChannelHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	/*
-		{
-			"channel": "foo"
-		}
-	*/
 	var nameThis struct {
 		Channel string `json:"channel"`
 	}
@@ -189,9 +192,29 @@ func (h *createChannelHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	channel := nameThis.Channel
 
-	// TODO - make this a working query
-	//rows, pgErr := h.postgresClient.Query(r.Context(), "insert into channels (uuid, name) values ($1, $2)", newUUID(), channel)
-	rows, pgErr := h.postgresClient.Query(r.Context(), "insert into channels (uuid, name) VALUES ($1, $2)", newUUID(), channel)
+	rows, pgErr := h.pgPool.Query(r.Context(), "insert into channels (uuid, name) VALUES ($1, $2)", newUUID(), channel)
+
+	// TODO - create handlePgErr func to deal with pgx error types (https://pkg.go.dev/github.com/jackc/pgx/v5#pkg-variables)
+	_, _ = rows, pgErr
+}
+
+type createUserHandler struct {
+	pgPool *pgxpool.Pool
+	tracer oteltrace.Tracer
+}
+
+func (h *createUserHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	var nameThis struct {
+		User string `json:"user"`
+	}
+
+	if err := unmarshalInto(r.Body, &nameThis); err != nil {
+		log.Fatal(err)
+	}
+
+	user := nameThis.User
+
+	rows, pgErr := h.pgPool.Query(r.Context(), "insert into users (uuid, name) VALUES ($1, $2)", newUUID(), user)
 
 	// TODO - create handlePgErr func to deal with pgx error types (https://pkg.go.dev/github.com/jackc/pgx/v5#pkg-variables)
 	_, _ = rows, pgErr
@@ -223,11 +246,10 @@ func renameChannel() {}
 
 // The user who creates the channel is marked in the channels table under the admin field. That field allows that user to rename the channel for everyone
 
-func produceMessage(ctx context.Context, p sarama.AsyncProducer, msg *sarama.ProducerMessage) error {
+func produceMessage(ctx context.Context, p sarama.AsyncProducer, msg *sarama.ProducerMessage) {
 	// https://github.com/dnwe/otelsarama/blob/main/example/producer/producer.go
 	if true { // Lock this behind otel enabled feature flag
 		otel.GetTextMapPropagator().Inject(ctx, otelsarama.NewProducerMessageCarrier(msg))
 	}
 	p.Input() <- msg
-	return nil
 }

@@ -8,6 +8,14 @@ Content-Type: application/json
   "channel": "{{$random.alphanumeric(10)}}"
 }
 
+### Create user endpoint
+POST {{franz-api}}/create-user
+Content-Type: application/json
+
+{
+  "user": "{{$random.alphanumeric(10)}}"
+}
+
 
 ### Chat endpoint
 # TODO - make this run in parallel

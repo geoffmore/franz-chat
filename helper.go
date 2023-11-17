@@ -21,12 +21,15 @@ func newPostgresClient(postgresConnection *string) *pgx.Conn {
 	return conn
 }
 
-func newPostgresConnPool(pgConn *string) *pgxpool.Pool {
+func newPostgresConnPool(conn *string) *pgxpool.Pool {
 	// https://stackoverflow.com/questions/70763022
 	// Conn pool is needed for concurrency
-	pool, err := pgxpool.New(context.Background(), *pgConn)
+	pool, err := pgxpool.New(context.Background(), *conn)
 	if err != nil {
 		log.Fatal("Unable to establish connection pool")
+	}
+	if err := pool.Ping(context.Background()); err != nil {
+		log.Fatal("Unable to connect to DB using connection pool")
 	}
 	return pool
 }
