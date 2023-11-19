@@ -12,13 +12,13 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
-	"log"
 )
 
 type app struct {
-	postgresClient     *pgx.Conn
-	kafkaSyncProducer  sarama.SyncProducer
-	kafkaAsyncProducer sarama.AsyncProducer
+	postgresClient    *pgx.Conn
+	kafkaSyncProducer sarama.SyncProducer
+	*AsyncProducer
+	*SyncProducer
 	kafkaConsumerGroup sarama.ConsumerGroup
 	pgPool             *pgxpool.Pool
 	tracer             trace.Tracer
@@ -27,8 +27,11 @@ type app struct {
 }
 
 func (a *app) Close() error {
-	if err := a.kafkaAsyncProducer.Close(); err != nil {
-		log.Println("Failed to close kafka AsyncProducer!")
+	if a.AsyncProducer != nil {
+		a.AsyncProducer.producer.Close()
+	}
+	if a.SyncProducer != nil {
+		a.SyncProducer.producer.Close()
 	}
 	return nil
 }

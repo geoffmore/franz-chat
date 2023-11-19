@@ -1,16 +1,13 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/IBM/sarama"
-	"github.com/dnwe/otelsarama"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/peterbourgon/ff/v3"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/semconv/v1.13.0/httpconv"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"io"
@@ -58,14 +55,28 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Init tracing
 	if true { // TODO - wrap in trace enablement feature flag
 		if err := a.RegisterTracer(appName); err != nil {
 			log.Fatal(err)
 		}
 	}
 
+	// Init configs
+	kafkaCfg := newKafkaConfig(kafkaConnection)
+
+	if a.tracer != nil {
+		kafkaCfg.tracer = a.tracer
+	}
+
 	// Init stateful connections
-	a.kafkaAsyncProducer = newKafkaAsyncProducer(kafkaConnection)
+	// a.AsyncProducer = newAsyncProducer(kafkaCfg)
+	a.AsyncProducer = &AsyncProducer{
+		producerMetadata: nil,
+		producer:         newKafkaAsyncProducer(kafkaConnection),
+	}
+
+	// a.SyncProducer = newSyncProducer(kafkaCfg)
 	// a.kafkaConsumerGroup = newKafkaConsumerGroup(kafkaConnection, appName)
 	a.postgresClient = newPostgresClient(postgresConnection)
 	a.pgPool = newPostgresConnPool(postgresConnection)
@@ -100,7 +111,7 @@ func main() {
 	mux.HandleFunc("/chat",
 		// cannot call pointer method Handle on postChatMessageHandler
 		(&postChatMessageHandler{
-			producer: a.kafkaAsyncProducer,
+			producer: a.AsyncProducer.producer,
 			tracer:   a.tracer}).Handle,
 	)
 	mux.HandleFunc("/login",
@@ -113,6 +124,7 @@ func main() {
 			tracer: a.tracer,
 		}).Handle,
 	)
+	// TODO - investigate HTTP route tags
 	mux.HandleFunc("/create-user",
 		(&createUserHandler{
 			pgPool: a.pgPool,
@@ -138,6 +150,9 @@ type postChatMessageHandler struct {
 	postgresClient    *pgx.Conn
 	tracer            oteltrace.Tracer
 }
+
+// TODO - change all handlers to methods on *app (after kafka bugs are resolved)
+// func (a *app) postChatHandler() {}
 
 func (h *postChatMessageHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var postChatRequest PostChatRequest
@@ -165,6 +180,15 @@ func (h *postChatMessageHandler) Handle(w http.ResponseWriter, r *http.Request) 
 			Value: sarama.StringEncoder(postChatRequest.Msg),
 		},
 	)
+	/*
+		// TODO - bug somewhere in main.AsyncProducer
+		h.producer.produceMessage(ctx,
+			&sarama.ProducerMessage{
+				Topic: chatTopic,
+				Value: sarama.StringEncoder(postChatRequest.Msg),
+			},
+		)
+	*/
 	if err != nil {
 		log.Print(err)
 	}
@@ -245,11 +269,3 @@ func validateChannel() {}
 func renameChannel() {}
 
 // The user who creates the channel is marked in the channels table under the admin field. That field allows that user to rename the channel for everyone
-
-func produceMessage(ctx context.Context, p sarama.AsyncProducer, msg *sarama.ProducerMessage) {
-	// https://github.com/dnwe/otelsarama/blob/main/example/producer/producer.go
-	if true { // Lock this behind otel enabled feature flag
-		otel.GetTextMapPropagator().Inject(ctx, otelsarama.NewProducerMessageCarrier(msg))
-	}
-	p.Input() <- msg
-}
