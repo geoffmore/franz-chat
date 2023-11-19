@@ -102,12 +102,7 @@ func main() {
 		)
 	*/
 
-	mux.HandleFunc("/chat",
-		// cannot call pointer method Handle on postChatMessageHandler
-		(&postChatMessageHandler{
-			producer: a.AsyncProducer,
-			tracer:   a.tracer}).Handle,
-	)
+	mux.HandleFunc("/chat", a.postChatHandler)
 	mux.HandleFunc("/login",
 		(&loginHandler{postgresClient: a.postgresClient}).Handle,
 	)
@@ -144,7 +139,38 @@ type postChatMessageHandler struct {
 }
 
 // TODO - change all handlers to methods on *app (after kafka bugs are resolved)
-// func (a *app) postChatHandler() {}
+func (a *app) postChatHandler(w http.ResponseWriter, r *http.Request) {
+	var postChatRequest PostChatRequest
+	// TODO - rename spanName to "method http.route" to conform with spec
+	/* TODO - figure out how to conform to https://opentelemetry.io/docs/specs/semconv/http/http-spans/ while also
+	moving away from the deprecated httpconv (https://github.com/open-telemetry/opentelemetry-go/releases/tag/v1.17.0)
+	*/
+	// TODO - figure out how to separate a route from a path (route should not be rendered as path)
+	ctx, span := a.tracer.Start(r.Context(), fmt.Sprintf("%s %s", r.Method, r.URL.Redacted()),
+		oteltrace.WithSpanKind(oteltrace.SpanKindServer),
+		oteltrace.WithAttributes(httpconv.ServerRequest("", r)...),
+	)
+	defer span.End()
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Println("unable to read body")
+	}
+	if err := json.Unmarshal(body, &postChatRequest); err != nil {
+		log.Println("unable to unmarshal json body")
+	}
+
+	a.AsyncProducer.produceMessage(ctx,
+		&sarama.ProducerMessage{
+			Topic: chatTopic,
+			Value: sarama.StringEncoder(postChatRequest.Msg),
+		},
+	)
+
+	if err != nil {
+		log.Print(err)
+	}
+}
 
 func (h *postChatMessageHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var postChatRequest PostChatRequest
