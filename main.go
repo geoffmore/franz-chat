@@ -64,18 +64,12 @@ func main() {
 
 	// Init configs
 	kafkaCfg := newKafkaConfig(kafkaConnection)
-
 	if a.tracer != nil {
 		kafkaCfg.tracer = a.tracer
 	}
 
 	// Init stateful connections
-	// a.AsyncProducer = newAsyncProducer(kafkaCfg)
-	a.AsyncProducer = &AsyncProducer{
-		producerMetadata: nil,
-		producer:         newKafkaAsyncProducer(kafkaConnection),
-	}
-
+	a.AsyncProducer = newAsyncProducer(kafkaCfg)
 	// a.SyncProducer = newSyncProducer(kafkaCfg)
 	// a.kafkaConsumerGroup = newKafkaConsumerGroup(kafkaConnection, appName)
 	a.postgresClient = newPostgresClient(postgresConnection)
@@ -111,7 +105,7 @@ func main() {
 	mux.HandleFunc("/chat",
 		// cannot call pointer method Handle on postChatMessageHandler
 		(&postChatMessageHandler{
-			producer: a.AsyncProducer.producer,
+			producer: a.AsyncProducer,
 			tracer:   a.tracer}).Handle,
 	)
 	mux.HandleFunc("/login",
@@ -145,10 +139,8 @@ type PostChatRequest struct {
 }
 
 type postChatMessageHandler struct {
-	kafkaSyncProducer sarama.SyncProducer
-	producer          sarama.AsyncProducer
-	postgresClient    *pgx.Conn
-	tracer            oteltrace.Tracer
+	producer *AsyncProducer
+	tracer   oteltrace.Tracer
 }
 
 // TODO - change all handlers to methods on *app (after kafka bugs are resolved)
@@ -174,21 +166,14 @@ func (h *postChatMessageHandler) Handle(w http.ResponseWriter, r *http.Request) 
 	if err := json.Unmarshal(body, &postChatRequest); err != nil {
 		log.Println("unable to unmarshal json body")
 	}
-	produceMessage(ctx, h.producer,
+
+	h.producer.produceMessage(ctx,
 		&sarama.ProducerMessage{
 			Topic: chatTopic,
 			Value: sarama.StringEncoder(postChatRequest.Msg),
 		},
 	)
-	/*
-		// TODO - bug somewhere in main.AsyncProducer
-		h.producer.produceMessage(ctx,
-			&sarama.ProducerMessage{
-				Topic: chatTopic,
-				Value: sarama.StringEncoder(postChatRequest.Msg),
-			},
-		)
-	*/
+
 	if err != nil {
 		log.Print(err)
 	}
