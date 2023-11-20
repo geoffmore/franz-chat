@@ -116,18 +116,10 @@ func newSyncProducer(cfg *kafkaConfig) *SyncProducer {
 	return &p
 }
 
-func produceMessage(ctx context.Context, p sarama.AsyncProducer, msg *sarama.ProducerMessage) {
+func (p *AsyncProducer) produceMessage(ctx context.Context, msg *sarama.ProducerMessage) {
 	// https://github.com/dnwe/otelsarama/blob/main/example/producer/producer.go
 
 	// TODO - determine how to determine if an AsyncProducer was modified with otelsarama.WrapAsyncProducer
-	if true { // Lock this behind otel enabled feature flag
-		otel.GetTextMapPropagator().Inject(ctx, otelsarama.NewProducerMessageCarrier(msg))
-	}
-	p.Input() <- msg
-}
-
-func (p *AsyncProducer) produceMessage(ctx context.Context, msg *sarama.ProducerMessage) {
-	// Bug is here
 	if p.tracer != nil {
 		otel.GetTextMapPropagator().Inject(ctx, otelsarama.NewProducerMessageCarrier(msg))
 	}
@@ -141,35 +133,4 @@ func (p *SyncProducer) produceMessage(ctx context.Context, msg *sarama.ProducerM
 	if _, _, err := p.producer.SendMessage(msg); err != nil {
 		log.Println("Failed to write message to Kafka", err)
 	}
-}
-
-func newKafkaAsyncProducer(conn *string) sarama.AsyncProducer {
-	// See https://github.com/IBM/sarama/blob/main/examples/http_server/http_server.go
-
-	config := sarama.NewConfig()
-	// Async Settings
-	config.Producer.RequiredAcks = sarama.WaitForLocal       // Only wait for the leader to ack
-	config.Producer.Compression = sarama.CompressionSnappy   // Compress messages
-	config.Producer.Flush.Frequency = 500 * time.Millisecond // Flush batches every 500ms
-
-	c, err := sarama.NewClient(strings.Split(*conn, ","), config)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	producer, err := sarama.NewAsyncProducerFromClient(c)
-	if err != nil {
-		log.Fatal(err)
-	}
-	// TODO - lock this behind a feature flag
-	// https://github.com/IBM/sarama/issues/2510
-	if true {
-		producer = otelsarama.WrapAsyncProducer(c.Config(), producer)
-	}
-	go func() {
-		for err := range producer.Errors() {
-			log.Println("Failed to write message to Kafka", err)
-		}
-	}()
-	return producer
 }

@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// Contains clients
 type app struct {
 	postgresClient    *pgx.Conn
 	kafkaSyncProducer sarama.SyncProducer
@@ -45,7 +46,6 @@ func (a *app) RegisterTracer(name string) error {
 	// Expects env var OTEL_EXPORTER_OTLP_ENDPOINT
 	exp, err := otlptracegrpc.New(context.Background())
 
-	// traceExporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
 	if err != nil {
 		return err // nil, err
 	}
@@ -66,7 +66,7 @@ func (a *app) RegisterTracer(name string) error {
 
 	// Set global trace provider
 	otel.SetTracerProvider(traceProvider)
-	// Set W3C TextMap propogator
+	// Set W3C TextMap propagator
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	a.tracer = traceProvider.Tracer("")
 	return nil

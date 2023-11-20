@@ -7,6 +7,7 @@ require (
 	github.com/dnwe/otelsarama v0.0.0-20231109105609-0554bf007513
 	github.com/google/uuid v1.4.0
 	github.com/jackc/pgx/v5 v5.5.0
+	github.com/julienschmidt/httprouter v1.3.0
 	github.com/peterbourgon/ff/v3 v3.4.0
 	go.opentelemetry.io/otel v1.21.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.21.0

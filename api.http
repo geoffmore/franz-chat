@@ -1,7 +1,7 @@
 # TODO - use an openapi spec to generate requests instead
 
 ### Create channel endpoint
-POST {{franz-api}}/create-channel
+POST {{franz-api}}/create/channel
 Content-Type: application/json
 
 {
@@ -9,7 +9,7 @@ Content-Type: application/json
 }
 
 ### Create user endpoint
-POST {{franz-api}}/create-user
+POST {{franz-api}}/create/user
 Content-Type: application/json
 
 {
@@ -33,3 +33,9 @@ POST {{franz-api}}/dne
 ### No body
 
 POST {{franz-api}}/chat
+
+###
+GET {{franz-api}}/chat
+
+###
+GET {{franz-api}}/
