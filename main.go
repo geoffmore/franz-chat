@@ -171,7 +171,8 @@ func (a *app) postCreateUserHandler(r *http.Request) (int, interface{}) {
 func (a *app) setupRoutes(s service) {
 	s.POST("/chat",
 		a.postChatHandler,
-		// midContentType("application/json"),
+		midNoOp(),
+		midContentType("application/json"),
 	)
 	s.POST("/create/channel",
 		a.postCreateChannelHandler,
