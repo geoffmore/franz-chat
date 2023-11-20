@@ -37,10 +37,13 @@ func (s *service) POST(pattern string, handler Handler, middleware ...Middleware
 }
 
 func (s *service) wrapHandler(pattern string, handler Handler, middleware ...Middleware) http.Handler {
+	for _, m := range middleware {
+		// Do func types need be addressed by pointers to be mutable?
+		m(handler)
+	}
 	// This makes 0 sense, but it works
 	return http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-
 			// Setting content-type isn't necessary A b/c w.Write(b) calls DetectContentType(b)
 			// See https://pkg.go.dev/net/http#DetectContentType
 			// TODO - figure out a way to coerce json mime type in Handler return value
