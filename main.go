@@ -47,7 +47,6 @@ func main() {
 	a.AsyncProducer = newAsyncProducer(kafkaCfg)
 	// a.SyncProducer = newSyncProducer(kafkaCfg)
 	// a.kafkaConsumerGroup = newKafkaConsumerGroup(kafkaConnection, appName)
-	a.postgresClient = newPostgresClient(postgresConnection)
 	a.pgPool = newPostgresConnPool(postgresConnection)
 
 	s := newService()

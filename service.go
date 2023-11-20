@@ -37,9 +37,10 @@ func (s *service) POST(pattern string, handler Handler, middleware ...Middleware
 }
 
 func (s *service) wrapHandler(pattern string, handler Handler, middleware ...Middleware) http.Handler {
+	// Is middleware in reverse order of args?
 	for _, m := range middleware {
-		// Do func types need be addressed by pointers to be mutable?
-		m(handler)
+		// Functions are immutable, the handler is reassigned
+		handler = m(handler)
 	}
 	// This makes 0 sense, but it works
 	return http.HandlerFunc(
