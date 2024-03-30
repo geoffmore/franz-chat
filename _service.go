@@ -1,8 +1,9 @@
-package main
+package franz_chat
 
 import (
 	"fmt"
 	"github.com/julienschmidt/httprouter"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"log"
 	"net/http"
@@ -36,6 +37,10 @@ func (s *service) POST(pattern string, handler Handler, middleware ...Middleware
 	s.router.Handler(http.MethodPost, pattern, s.wrapHandler(pattern, handler, middleware...))
 }
 
+func (s *service) GET(pattern string, handler Handler, middleware ...Middleware) {
+	s.router.Handler(http.MethodGet, pattern, s.wrapHandler(pattern, handler, middleware...))
+}
+
 func (s *service) wrapHandler(pattern string, handler Handler, middleware ...Middleware) http.Handler {
 	// Is middleware in reverse order of args?
 	for _, m := range middleware {
@@ -64,4 +69,10 @@ func (s *service) wrapHandler(pattern string, handler Handler, middleware ...Mid
 
 func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
+}
+
+type OTLPConfig struct {
+	name             string
+	grpcExporterOpts otlptracegrpc.Option // https://pkg.go.dev/go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.21.0#Option
+	fooOpts          string
 }
