@@ -1,4 +1,4 @@
-package main
+package kafka
 
 import (
 	"context"
@@ -36,7 +36,7 @@ type SyncProducer struct {
 }
 
 // Creates the default sarama.Config with connection details for client gen
-func newKafkaConfig(conn *string) *kafkaConfig {
+func NewKafkaConfig(conn *string) *kafkaConfig {
 	return &kafkaConfig{
 		Config: sarama.NewConfig(),
 		conn:   conn,
@@ -44,7 +44,7 @@ func newKafkaConfig(conn *string) *kafkaConfig {
 }
 
 // Creates a AsyncProducer with opinions and optional tracing
-func newAsyncProducer(cfg *kafkaConfig) *AsyncProducer {
+func NewAsyncProducer(cfg *kafkaConfig) *AsyncProducer {
 	// See https://github.com/IBM/sarama/blob/main/examples/http_server/http_server.go
 
 	var p AsyncProducer
@@ -116,7 +116,7 @@ func newSyncProducer(cfg *kafkaConfig) *SyncProducer {
 	return &p
 }
 
-func (p *AsyncProducer) produceMessage(ctx context.Context, msg *sarama.ProducerMessage) {
+func (p *AsyncProducer) ProduceMessage(ctx context.Context, msg *sarama.ProducerMessage) {
 	// https://github.com/dnwe/otelsarama/blob/main/example/producer/producer.go
 
 	// TODO - determine how to determine if an AsyncProducer was modified with otelsarama.WrapAsyncProducer

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"github.com/IBM/sarama"
+	"github.com/geoffmore/franz-chat/internal/kafka"
 	"html/template"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -19,9 +22,16 @@ const (
 
 func main() {
 	var (
-		port = flag.Int("port", 8008, "Listen port")
+		port            = flag.Int("port", 8008, "Listen port")
+		kafkaConnection = flag.String("kafka.connection", "localhost:9094", "Kafka connection string")
 	)
 	flag.Parse()
+
+	// Init configs
+	kafkaCfg := kafka.NewKafkaConfig(kafkaConnection)
+
+	// Init stateful connections
+	asyncProducer := kafka.NewAsyncProducer(kafkaCfg)
 
 	// TODO - define log schema
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -35,6 +45,20 @@ func main() {
 	)
 	//http.HandleFunc("/", clientIndex)
 	//http.HandleFunc("/src/htmx.min.js", foo)
+	http.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
+		var (
+			ctx = r.Context()
+		)
+		if err := r.ParseForm(); err != nil {
+			fmt.Println(err)
+		}
+		// TODO - template index.html to set this key programatically
+		message, ok := r.PostForm["message"]
+		if !ok {
+			// Invalid key and/or blank form message
+		}
+		asyncProducer.ProduceMessage(ctx, &sarama.ProducerMessage{Topic: chatTopic, Value: sarama.StringEncoder(strings.Join(message, ""))})
+	})
 	http.HandleFunc("/test", testClientHandler)
 	err := http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
 	if err != nil {
@@ -47,6 +71,7 @@ func main() {
 }
 
 // Clients should always send html
+
 func testClientHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("%+v\n", r)
 	var b []byte
