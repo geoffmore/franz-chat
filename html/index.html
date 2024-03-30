@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="author" content="Jeff Moore"/>
+    <meta
+            name="description"
+            content="Franz Chat is an app that leverages Kafka as a backend to a chat app"
+    />
+    <!-- <link rel="icon" href="favicon.ico" type="image/x-icon" /> -->
+    <link rel="stylesheet" type="text/css" href="/static/styles/App.css"/>
+    <title>Franz Chat</title>
+    <script src="/static/src/htmx.min.js"></script>
+</head>
+<body>
+
+<div class="header"></div>
+<div class="container">
+    <div class="channel-list"></div>
+    <div class="chat-log">
+        <div id="chat-logs"></div>
+    </div>
+    <div class="login-box"></div>
+    <div class="chat-box">
+            <input type="text" name="message" id="chat-box"
+                   placeholder="Type here"
+                   hx-target="#chat-logs"
+                   hx-include="[name='message']"
+            >
+            <button
+                hx-post="/test"
+                hx-include="[name='message']"
+            >Submit
+            </button>
+        <label for="chat-box"></label>
+    </div>
+</div>
+<div class="footer"></div>
+</body>
+</html>

@@ -1,16 +1,15 @@
 package main
 
 import (
-	"encoding/json"
+	"bytes"
 	"flag"
 	"fmt"
-	"github.com/IBM/sarama"
-	"github.com/peterbourgon/ff/v3"
-	"go.opentelemetry.io/otel/semconv/v1.13.0/httpconv"
-	oteltrace "go.opentelemetry.io/otel/trace"
-	"io"
+	"html/template"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
+	"time"
 )
 
 const (
@@ -20,163 +19,71 @@ const (
 
 func main() {
 	var (
-		a                  = newApp()
-		kafkaConnection    = flag.String("kafka.connection", "localhost:9094", "Kafka connection string")
-		postgresConnection = flag.String("postgres.connection", "postgresql://franz_api:franz_api@localhost:5432/franz?application_name=franz_api", "Postgres connection")
-		port               = flag.Int("port", 8008, "Listen port")
+		port = flag.Int("port", 8008, "Listen port")
 	)
+	flag.Parse()
 
-	if err := ff.Parse(flag.CommandLine, nil); err != nil {
-		log.Fatal(err)
-	}
+	// TODO - define log schema
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-	// Init tracing
-	if true { // TODO - wrap in trace enablement feature flag
-		if err := a.RegisterTracer(appName); err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	// Init configs
-	kafkaCfg := newKafkaConfig(kafkaConnection)
-	if a.tracer != nil {
-		kafkaCfg.tracer = a.tracer
-	}
-
-	// Init stateful connections
-	a.AsyncProducer = newAsyncProducer(kafkaCfg)
-	// a.SyncProducer = newSyncProducer(kafkaCfg)
-	// a.kafkaConsumerGroup = newKafkaConsumerGroup(kafkaConnection, appName)
-	a.pgPool = newPostgresConnPool(postgresConnection)
-
-	s := newService()
-
-	// Set up routes
-	a.setupRoutes(s)
-	s.Start(port)
-
-	defer func() {
-		if err := a.Close(); err != nil {
-			log.Println("failed to close server connections")
-		}
-	}()
-}
-
-type PostChatRequest struct {
-	// How does backend capture expected json content with struct tags?
-	// Maybe I unmarshal into an interface and ask the question "Does the json object have the fields I need? and validate those fields against some struct or something
-	Channel string `json:"channel,omitempty"`
-	Msg     string `json:"msg,omitempty"`
-}
-
-func (a *app) postChatHandler(r *http.Request) (int, interface{}) {
-	var (
-		ctx             = r.Context()
-		postChatRequest PostChatRequest
+	// Serve static assets
+	// https://stackoverflow.com/questions/26559557
+	// TODO - make sure /static/index.html is distinct from assets
+	// TODO - convert this into a HandlerFunc that correlates all files with the original request
+	http.Handle("/static/",
+		http.StripPrefix("/static/", http.FileServer(http.Dir("./html"))),
 	)
-
-	// Does the channel exist?
-	// Is the message bad?
-
-	// TODO - maybe rename this to "schema" and make it a struct literal?
-	// TODO - rename spanName to "method http.route" to conform with spec
-	/* TODO - figure out how to conform to https://opentelemetry.io/docs/specs/semconv/http/http-spans/ while also
-	moving away from the deprecated httpconv (https://github.com/open-telemetry/opentelemetry-go/releases/tag/v1.17.0)
-	*/
-	// TODO - figure out how to separate a route from a path (route should not be rendered as path)
-	ctx, span := a.tracer.Start(ctx, fmt.Sprintf("%s %s", r.Method, r.URL.Redacted()),
-		oteltrace.WithSpanKind(oteltrace.SpanKindServer),
-		oteltrace.WithAttributes(httpconv.ServerRequest("", r)...),
-	)
-	defer span.End()
-
-	body, err := io.ReadAll(r.Body)
+	//http.HandleFunc("/", clientIndex)
+	//http.HandleFunc("/src/htmx.min.js", foo)
+	http.HandleFunc("/test", testClientHandler)
+	err := http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
 	if err != nil {
-		log.Println("unable to read body")
-	}
-	if err := json.Unmarshal(body, &postChatRequest); err != nil {
-		log.Println("unable to unmarshal json body")
+		// TODO - panic here
+		logger.Error(err.Error())
+		os.Exit(1)
 	}
 
-	a.AsyncProducer.produceMessage(ctx,
-		&sarama.ProducerMessage{
-			Topic: chatTopic,
-			Value: sarama.StringEncoder(postChatRequest.Msg),
-		},
-	)
+	// TODO - investigate whether it's worth making assets reachable via index.html directly (probably not)
+}
 
+// Clients should always send html
+func testClientHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("%+v\n", r)
+	var b []byte
+	if _, err := r.Body.Read(b); err != nil {
+		fmt.Println(err)
+	}
+	if err := r.ParseForm(); err != nil {
+		fmt.Println(err)
+	}
+	// TODO - template index.html to set this key programatically
+	message, ok := r.PostForm["message"]
+	if !ok {
+		// Invalid key and/or blank form message
+	}
+	fmt.Println(message)
+}
+
+func foo(w http.ResponseWriter, r *http.Request) {
+	var b []byte
+	var err error
+	if b, err = os.ReadFile("html/src/htmx.min.js"); err != nil {
+		log.Fatal(err)
+	}
+	reader := bytes.NewReader(b)
+
+	// Iterate over html directory
+	// Generate a map of
+	http.ServeContent(w, r, "foo", time.Now(), reader)
+}
+
+func clientIndex(w http.ResponseWriter, r *http.Request) {
+	// TODO - send htmx with correct mime type
+	// TODO - send css with correct mime type
+	t, err := template.ParseFiles("html/index.html")
 	if err != nil {
-		log.Print(err)
-	}
-	return httpJSONOk() // should be the expected response
-}
-
-type PostCreateChannelRequest struct {
-	Channel string `json:"channel"`
-}
-
-func (a *app) postCreateChannelHandler(r *http.Request) (int, interface{}) {
-	var (
-		ctx    = r.Context()
-		schema PostCreateChannelRequest
-	)
-
-	ctx, span := a.tracer.Start(ctx, fmt.Sprintf("%s %s", r.Method, r.URL.Redacted()),
-		oteltrace.WithSpanKind(oteltrace.SpanKindServer),
-		oteltrace.WithAttributes(httpconv.ServerRequest("", r)...),
-	)
-	defer span.End()
-
-	if err := unmarshalInto(r.Body, &schema); err != nil {
 		log.Fatal(err)
 	}
-
-	rows, pgErr := a.pgPool.Query(r.Context(), "insert into channels (uuid, name) VALUES ($1, $2)", newUUID(), schema.Channel)
-
-	// TODO - create handlePgErr func to deal with pgx error types (https://pkg.go.dev/github.com/jackc/pgx/v5#pkg-variables)
-	_, _ = rows, pgErr
-
-	return httpJSONOk() // should be the expected response
-}
-
-type PostCreateUserRequest struct {
-	User string `json:"user"`
-}
-
-func (a *app) postCreateUserHandler(r *http.Request) (int, interface{}) {
-	var (
-		ctx    = r.Context()
-		schema PostCreateUserRequest
-	)
-
-	ctx, span := a.tracer.Start(ctx, fmt.Sprintf("%s %s", r.Method, r.URL.Redacted()),
-		oteltrace.WithSpanKind(oteltrace.SpanKindServer),
-		oteltrace.WithAttributes(httpconv.ServerRequest("", r)...),
-	)
-	defer span.End()
-
-	if err := unmarshalInto(r.Body, &schema); err != nil {
-		log.Fatal(err)
-	}
-
-	rows, pgErr := a.pgPool.Query(r.Context(), "insert into users (uuid, name) VALUES ($1, $2)", newUUID(), schema.User)
-
-	// TODO - create handlePgErr func to deal with pgx error types (https://pkg.go.dev/github.com/jackc/pgx/v5#pkg-variables)
-	_, _ = rows, pgErr
-
-	return httpJSONOk() // should be the expected response
-}
-
-func (a *app) setupRoutes(s service) {
-	s.POST("/chat",
-		a.postChatHandler,
-		midNoOp(),
-		midContentType("application/json"),
-	)
-	s.POST("/create/channel",
-		a.postCreateChannelHandler,
-	)
-	s.POST("/create/user",
-		a.postCreateUserHandler,
-	)
+	err = t.Execute(w, nil)
+	// I'm guessing a client request is typically accompanied by a server request
 }
