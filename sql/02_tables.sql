@@ -1,4 +1,4 @@
--- Use franz DB
+-- Use schema franz_chat.public
 
 -- CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS users (
@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS channels (
     -- TODO add owner field from users for channel ownership
 );
 
-CREATE ROLE franz_api WITH LOGIN PASSWORD 'franz_api';
+CREATE TABLE IF NOT EXISTS messages (
+    uuid uuid PRIMARY KEY,
+    message varchar(140) -- based on Twitter original char length
+);
 
-ALTER TABLE users OWNER TO franz_api;
-ALTER TABLE channels OWNER to franz_api;
