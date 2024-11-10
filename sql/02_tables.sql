@@ -1,20 +1,19 @@
 -- Use schema franz_chat.public
 
--- CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS users (
     -- Primary key is a combo of unique and not null
     uuid uuid PRIMARY KEY,
-    name varchar(10) NOT NULL
+    name varchar(20) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS channels (
     uuid uuid PRIMARY KEY,
-    name varchar(10) NOT NULL UNIQUE
+    name varchar(20) NOT NULL UNIQUE
     -- TODO add owner field from users for channel ownership
 );
 
 CREATE TABLE IF NOT EXISTS messages (
     uuid uuid PRIMARY KEY,
-    message varchar(140) -- based on Twitter original char length
+    timestamp timestamp with time zone NOT NULL, -- implicit UTC with automatic conversion
+    message varchar(140) NOT NULL -- based on Twitter original char length
 );
-

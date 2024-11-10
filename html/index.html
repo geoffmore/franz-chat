@@ -14,27 +14,29 @@
 </head>
 <body>
 
-<div class="header"></div>
-<div class="container">
-    <div class="channel-list"></div>
-    <div class="chat-log">
-        <div id="chat-logs"></div>
-    </div>
+<header class="header"></header>
+<main class="container">
+    <div hx-get="/channels" hx-trigger="every 60s" hx-include="[name='channel']" hx-swap="innerHTML" class="channel-list">
+        <!-- assume defaultLineLimit + 1 vertical cells where the last cell is the create/subscribe button -->
+        <!-- See https://htmx.org/docs/#swapping -->
+    </div> <!-- TODO - poll for channels? -->
+    <div class="chat-log" hx-get="/messages" hx-trigger="every 10s"></div>
     <div class="login-box"></div>
     <div class="chat-box">
             <input type="text" name="message" id="chat-box"
                    placeholder="Type here"
-                   hx-target="#chat-logs"
                    hx-include="[name='message']"
             >
+            <!-- hx-target="#chat-logs" -->
             <button
+                type="submit"
                 hx-post="/chat"
                 hx-include="[name='message']"
-            >Submit
+            >Enter
             </button>
         <label for="chat-box"></label>
     </div>
-</div>
-<div class="footer"></div>
+</main>
+<footer class="footer"></footer>
 </body>
 </html>
