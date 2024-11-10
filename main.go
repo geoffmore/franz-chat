@@ -7,7 +7,7 @@ import (
 	"github.com/IBM/sarama"
 	"github.com/geoffmore/franz-chat/internal/kafka"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/peterbourgon/ff/v3"
 	"html/template"
 	"log"
@@ -31,12 +31,14 @@ func main() {
 		postgresConnection string
 		serviceName        string
 		serviceVersion     string
+		startupTimeout     time.Duration
 	)
 	flag.IntVar(&port, "port", 8008, "Listen port")
 	flag.StringVar(&kafkaConnection, "kafka.connection", "localhost:9092", "Kafka connection string")
 	flag.StringVar(&postgresConnection, "postgres.connection", "postgresql://franz_chat:franz_chat@localhost:5432/franz_chat?application_name=franz_chat", "Postgres connection string")
 	flag.StringVar(&serviceName, "service.name", "franz-chat", "Service name")
 	flag.StringVar(&serviceVersion, "service.version", "v0.0.0", "Service version")
+	flag.DurationVar(&startupTimeout, "startup.timeout", 30*time.Second, "Startup timeout")
 
 	if err := ff.Parse(flag.CommandLine, os.Args[1:], ff.WithEnvVars()); err != nil {
 		log.Fatal(err)
@@ -47,17 +49,13 @@ func main() {
 
 	// Init stateful connections
 	asyncProducer := kafka.NewAsyncProducer(kafkaCfg) // TODO - there is a bug here
-	pgConn, err := pgx.Connect(context.Background(), postgresConnection)
+
+	pgPool, err := pgxpool.New(context.Background(), postgresConnection)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	defer func(pgConn *pgx.Conn, ctx context.Context) {
-		err := pgConn.Close(ctx)
-		if err != nil {
-			fmt.Println(err)
-		}
-	}(pgConn, context.Background())
+	defer pgPool.Close()
 
 	// TODO - define log schema
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -90,9 +88,10 @@ func main() {
 		// TODO - See https://github.com/jackc/pgx/wiki/UUID-Support and maybe use uuid.New() instead of uuid.New().String()
 		// TODO - use pgxpool instead of pgx
 		// TODO - unable to send more than a single message in an app run
-		err := pgConn.QueryRow(context.Background(), "INSERT INTO messages VALUES ($1, $2)", uuid.New().String(), strings.Join(message, ""))
-		if err != nil {
-			fmt.Println(err)
+		// TODO - use pgConn.SendBatch to send multiple messages
+		row := pgPool.QueryRow(context.Background(), "INSERT INTO messages VALUES ($1, $2)", uuid.New().String(), strings.Join(message, ""))
+		if row != nil {
+			fmt.Println(row)
 		}
 	})
 
