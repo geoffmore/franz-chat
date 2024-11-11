@@ -53,6 +53,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Load templates
+	// TODO - instead of panic, gracefully exit with logger
+	templatePostChat := template.Must(template.ParseFiles("./templates/postChat.html"))
+
+	// TODO - render index.html with initial template content. This should limit config drift
+
+	// TODO - is it safe to assume that every endpoint returns an HTML object?
+
 	// Init configs
 	kafkaCfg := kafka.NewKafkaConfig(&kafkaConnection)
 
@@ -129,6 +137,10 @@ func main() {
 				fmt.Println(pgErr.Message)
 				fmt.Println(pgErr.Code)
 			}
+		}
+		err = templatePostChat.Execute(w, nil)
+		if err != nil {
+			fmt.Println(err)
 		}
 	})
 
