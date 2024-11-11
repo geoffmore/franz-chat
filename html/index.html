@@ -20,7 +20,17 @@
         <!-- assume defaultLineLimit + 1 vertical cells where the last cell is the create/subscribe button -->
         <!-- See https://htmx.org/docs/#swapping -->
     </div> <!-- TODO - poll for channels? -->
-    <div class="chat-log" hx-get="/messages" hx-trigger="every 10s"></div>
+    <div class="channel-box">
+        <!-- TODO - determine how to make a button into a text box, then a button again -->
+        <button class="button">Create Channel</button>
+    </div>
+    <div
+        class="chat-log"
+        hx-get="/messages"
+        hx-trigger="every 30s"
+    >
+    <!-- hx-swap="afterend" --> <!-- my implementation of hx-swap is incorrect, so I'm opting to replace here -->
+    </div>
     <div class="login-box"></div>
     <div class="chat-box">
             <input type="text" name="message" id="chat-box"
@@ -29,7 +39,7 @@
             >
             <!-- hx-target="#chat-logs" -->
             <!-- https://stackoverflow.com/questions/6890476 -->
-            <button id="post-chat"
+            <button id="post-chat" class="button"
                 type="submit"
                 hx-post="/chat"
                 hx-swap="outerHTML"

@@ -8,6 +8,7 @@ import (
 	"github.com/IBM/sarama"
 	"github.com/geoffmore/franz-chat/internal/kafka"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	// How do I support this uuid natively in PGX. Will this improve performance?
 	"github.com/google/uuid"
@@ -55,7 +56,8 @@ func main() {
 
 	// Load templates
 	// TODO - instead of panic, gracefully exit with logger
-	templatePostChat := template.Must(template.ParseFiles("./templates/postChat.html"))
+	templatePostChat := template.Must(template.ParseFiles("./templates/postChat.html.tmpl"))
+	templateGetMessages := template.Must(template.ParseFiles("./templates/getMessages.html.tmpl"))
 
 	// TODO - render index.html with initial template content. This should limit config drift
 
@@ -90,6 +92,13 @@ func main() {
 	// TODO - define log schema
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
+	// TODO - listen/notify
+	// Setup Postgres Listener
+	//_, err = pgPool.Exec(context.Background(), "LISTEN messages")
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+
 	// Serve static assets
 	// https://stackoverflow.com/questions/26559557
 	// TODO - make sure /static/index.html is distinct from assets
@@ -123,24 +132,31 @@ func main() {
 		// TODO - use pgConn.SendBatch to send multiple messages
 		// NOTE - statements are prepared/cached automagically with pgx
 		//
-		err := pgPool.QueryRow(context.Background(), "INSERT INTO messages VALUES ($1, $2, $3)",
-			uuid.New().String(),
-			strings.Join(message, ""),
-			start,
-		).Scan()
 
-		// TODO -r.
-		// https://github.com/jackc/pgx/wiki/Error-Handling TODO - make a query/error handling function
-		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) {
-				fmt.Println(pgErr.Message)
-				fmt.Println(pgErr.Code)
+		msg := strings.Join(message, "")
+		// Prevent empty messages from entering DB
+		if len(msg) > 0 {
+			err := pgPool.QueryRow(context.Background(), "INSERT INTO messages VALUES ($1, $2, $3)",
+				uuid.New().String(),
+				msg,
+				start,
+			).Scan()
+
+			// https://github.com/jackc/pgx/wiki/Error-Handling TODO - make a query/error handling function
+			if err != nil {
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) {
+					fmt.Println(pgErr.Message)
+					fmt.Println(pgErr.Code)
+				}
 			}
-		}
-		err = templatePostChat.Execute(w, nil)
-		if err != nil {
-			fmt.Println(err)
+			err = templatePostChat.Execute(w, nil)
+			if err != nil {
+				fmt.Println(err)
+			}
+		} else {
+			w.WriteHeader(http.StatusBadRequest) // Send 400 for htmx to handle button preservation
+			fmt.Println("Unable to add empty message")
 		}
 	})
 
@@ -183,22 +199,17 @@ func main() {
 			fmt.Println(err)
 		}
 		_ = ctx
-		//// TODO - template index.html to set this key programatically
+		// TODO - template index.html to set this key programatically
 		channel, ok := r.PostForm["channel"] // TODO - sanitize channel name
 		if !ok {
 			// Invalid key and/or blank form message
 		}
-		//asyncProducer.ProduceMessage(ctx, &sarama.ProducerMessage{Topic: chatTopic, Value: sarama.StringEncoder(strings.Join(message, ""))})
-		//// Write to postgres
-		//// Should I generate a UUID on message send (for listen/notify) or should I have postgres send back a uuid on commit?
-		//// See https://github.com/jackc/pgx/wiki/Getting-started-with-pgx
-		//// TODO - use a prepared statement
-		//// TODO - See https://github.com/jackc/pgx/wiki/UUID-Support and maybe use uuid.New() instead of uuid.New().String()
-		//// TODO - use pgxpool instead of pgx
-		//// TODO - unable to send more than a single message in an app run
-		//// TODO - use pgConn.SendBatch to send multiple messages
-		//// NOTE - statements are prepared/cached automagically with pgx
-		////
+		// Write to postgres
+		// Should I generate a UUID on message send (for listen/notify) or should I have postgres send back a uuid on commit?
+		// See https://github.com/jackc/pgx/wiki/Getting-started-with-pgx
+		// TODO - See https://github.com/jackc/pgx/wiki/UUID-Support and maybe use uuid.New() instead of uuid.New().String()
+		// TODO - use pgConn.SendBatch to send multiple messages
+		// NOTE - statements are prepared/cached automagically with pgx, but manual statements could be useful for VCS
 		err := pgPool.QueryRow(context.Background(), "INSERT INTO channels VALUES ($1, $2)",
 			uuid.New().String(),
 			channel,
@@ -213,31 +224,47 @@ func main() {
 		}
 	})
 
-	//consumer := kafka.NewConsumer()
-	//consumerCtx := context.WithCancel(context.Background())
-
 	channelMessages := make(map[string][channelMessageLimit]ChatMessage)
 	_ = channelMessages
 
+	type message struct {
+		Timestamp time.Time // pgtype.Timestamp could be used, but it's more noisy
+		Name      string
+		Message   string
+	}
 	http.HandleFunc("/messages",
 		func(w http.ResponseWriter, r *http.Request) {
 			var (
-				ctx = r.Context()
+				ctx  = r.Context()
+				rows pgx.Rows
 			)
-			_ = ctx
-			tmpl, err := template.ParseFiles("templates/chat-messages.html")
-			if err != nil {
-				log.Printf(err.Error())
+
+			/* TODO - store latest timestamp in client, so when GET /messages is called, there is no need to get ALL messages
+			For now, LIMIT is being used to offset the load, but OFFSET should be used eventually
+			*/
+			if rows, err = pgPool.Query(ctx, "SELECT message, date_trunc('minute', timestamp) FROM messages ORDER BY timestamp DESC LIMIT $1", defaultLineLimit); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				fmt.Println(err)
 			}
-			err = tmpl.Execute(w, nil)
+
+			messages, err := pgx.CollectRows[message](rows, func(row pgx.CollectableRow) (message, error) {
+				var msg message
+				var pgTime pgtype.Timestamp
+				err := row.Scan(&msg.Message, &pgTime) // https://github.com/jackc/pgx/issues/985#issuecomment-817026395
+				msg.Timestamp = pgTime.Time
+				msg.Name = "TODO" // TODO - this will come with user login. Perhaps there will be an anonymous user
+				return msg, err
+			})
 			if err != nil {
-				log.Printf(err.Error())
+				fmt.Println(err)
 			}
-			// Get all messages from kafka
-			// Render a template
-			// Return template to htmx
+			err = templateGetMessages.Execute(w, messages)
+			if err != nil {
+				fmt.Println(err)
+			}
+			/* TODO - maybe have the frontend send the uuid of the last message and some time comparison can be done to
+			get all messages since then
+			*/
 		},
-		// Only grab latest 100 messages from each channel (because of laziness)
 	)
 
 	err = http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
@@ -263,8 +290,6 @@ type ChatMessage struct {
 // Then, add an option to add channels if they don't exist and/or create them
 
 // Maybe try https://htmx.org/docs/#load_polling
-
-// TODO - listen/notify
 
 // create/join channel button that temporarily modifies the channel window
 
