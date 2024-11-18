@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"github.com/IBM/sarama"
 	"github.com/geoffmore/franz-chat/internal/kafka"
+	"github.com/geoffmore/franz-chat/internal/lib"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-
+	"github.com/prometheus/client_golang/prometheus"
 	// How do I support this uuid natively in PGX. Will this improve performance?
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -17,11 +18,12 @@ import (
 	"github.com/peterbourgon/ff/v3"
 	"html/template"
 	"log"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
@@ -42,6 +44,7 @@ func main() {
 		serviceName        string
 		serviceVersion     string
 		startupTimeout     time.Duration
+		logLevel           string
 	)
 	flag.IntVar(&port, "port", 8008, "Listen port")
 	flag.StringVar(&kafkaConnection, "kafka.connection", "localhost:9092", "Kafka connection string")
@@ -49,15 +52,24 @@ func main() {
 	flag.StringVar(&serviceName, "service.name", "franz-chat", "Service name")
 	flag.StringVar(&serviceVersion, "service.version", "v0.0.0", "Service version")
 	flag.DurationVar(&startupTimeout, "startup.timeout", 30*time.Second, "Startup timeout")
+	flag.StringVar(&logLevel, "log.level", "info", "log level")
 
 	if err := ff.Parse(flag.CommandLine, os.Args[1:], ff.WithEnvVars()); err != nil {
+		// TODO - determine how to use logger here
 		log.Fatal(err)
 	}
 
+	// Initialize logger
+	// TODO - define log schema
+	logger := lib.NewLogger(serviceName, serviceVersion, logLevel)
+
 	// Load templates
-	// TODO - instead of panic, gracefully exit with logger
-	templatePostChat := template.Must(template.ParseFiles("./templates/postChat.html.tmpl"))
-	templateGetMessages := template.Must(template.ParseFiles("./templates/getMessages.html.tmpl"))
+	var (
+		templatePostChat    *template.Template
+		templateGetMessages *template.Template
+	)
+	templatePostChat = handleTemplateRender(logger, "./templates/postChat.html.tmpl")
+	templateGetMessages = handleTemplateRender(logger, "./templates/getMessages.html.tmpl")
 
 	// TODO - render index.html with initial template content. This should limit config drift
 
@@ -66,31 +78,31 @@ func main() {
 	// Init configs
 	kafkaCfg := kafka.NewKafkaConfig(&kafkaConnection)
 
-	// Init stateful connections
+	// Initialize stateful connections
 	asyncProducer := kafka.NewAsyncProducer(kafkaCfg) // TODO - there is a bug here
 
 	// TODO - try https://github.com/jackc/pgx/wiki/UUID-Support eventually with google/uuid
 
 	pgPool, err := pgxpool.New(context.Background(), postgresConnection)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		logger.Fatal("", err)
 	}
 	defer pgPool.Close()
 
-	// Create default channel on startup if not exists; grab its UUID
-	// defaultChannelUUID =
+	c, err := pgPool.Acquire(context.Background())
+	if err != nil {
+	}
 
 	// TODO - log info attempting to create default channel <defaultChannel value>. And another message for create/no-op/err
 	// TODO - optimize this into a subquery
+	// Create default channel on startup if not exists; grab its UUID
+	// Maybe isDefault column would be helpful on the channels table
+	// defaultChannelUUID =
 	err = pgPool.QueryRow(context.Background(), "SELECT uuid FROM channels WHERE name == $1", defaultChannel).Scan()
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		// TODO - make default channel uuid all zeroes
 		_ = pgPool.QueryRow(context.Background(), "INSERT INTO channels VALUES ($1, $2)", uuid.New(), defaultChannel)
 	}
-
-	// TODO - define log schema
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	// TODO - listen/notify
 	// Setup Postgres Listener
@@ -99,9 +111,44 @@ func main() {
 	//	log.Fatal(err)
 	//}
 
+	// Create a Prometheus registry.
+	registry := prometheus.NewRegistry()
+
+	// Register default app metrics
+	appMetrics := lib.NewAppMetrics(registry)
+
+	// ??? PG metrics. This may need to be conditionally registered/unregistered
+	/* TODO - there is a bug here. When lib.NewPGMetrics is called, it immediately generates metrics with a default value of 0
+	instead, I want to conditionally generate metrics when a session lock is present. I _could_ curry metrics with a label to be extra safe
+	but that feels weird. Perhaps promauto is not suited for this use case. I'm not sure if I can define pgMetrics without values being rendered
+	The case where a session lock is not present, it is grabbed, and generates metrics works
+	*/
+
+	// Acquire connection for metrics collector
+	foo, err := pgPool.Acquire(context.Background())
+	if err != nil {
+		logger.Fatal("", err)
+	}
+
+	// Always initialize prometheus.Collector, which does not collect metrics until registered
+	franzDBCollector := lib.NewFranzDBStatsCollector(context.Background(), foo)
+
+	// Session lock based metrics registration
+	go func() {
+		for {
+			lib.HandleSessionMetrics(context.Background(), c, logger, registry, franzDBCollector)
+			time.Sleep(60 * time.Second)
+		}
+	}()
+
+	http.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{
+		Registry: registry,
+		// ErrorLog: logger, // TODO - add logger here
+	}))
 	// Serve static assets
 	// https://stackoverflow.com/questions/26559557
 	// TODO - make sure /static/index.html is distinct from assets
+	// TODO - make index.html into a template and make it composable with its children to prevent runtime modifications
 	// TODO - convert this into a HandlerFunc that correlates all files with the original request
 	http.Handle("/static/",
 		http.StripPrefix("/static/", http.FileServer(http.Dir("./html"))),
@@ -114,7 +161,7 @@ func main() {
 			start = time.Now() // Note - https://stackoverflow.com/questions/15827329/
 		)
 		if err := r.ParseForm(); err != nil {
-			fmt.Println(err)
+			logger.Error("", err)
 		}
 		// TODO - template index.html to set this key programatically
 		message, ok := r.PostForm["message"]
@@ -131,32 +178,29 @@ func main() {
 		// TODO - unable to send more than a single message in an app run
 		// TODO - use pgConn.SendBatch to send multiple messages
 		// NOTE - statements are prepared/cached automagically with pgx
-		//
 
 		msg := strings.Join(message, "")
 		// Prevent empty messages from entering DB
-		if len(msg) > 0 {
-			err := pgPool.QueryRow(context.Background(), "INSERT INTO messages VALUES ($1, $2, $3)",
+		if len(msg) <= 0 {
+			w.WriteHeader(http.StatusBadRequest) // Send 400 for htmx to handle button preservation
+			logger.Warn("Unable to add empty message")
+		} else {
+			// TODO - exit early here rather than wrapping everything in this else statement
+
+			if err := pgPool.QueryRow(context.Background(), "INSERT INTO messages VALUES ($1, $2, $3)",
 				uuid.New().String(),
 				msg,
 				start,
-			).Scan()
-
-			// https://github.com/jackc/pgx/wiki/Error-Handling TODO - make a query/error handling function
-			if err != nil {
-				var pgErr *pgconn.PgError
-				if errors.As(err, &pgErr) {
-					fmt.Println(pgErr.Message)
-					fmt.Println(pgErr.Code)
-				}
+			).Scan(); lib.HandlePGError(err, pgx.ErrNoRows) != nil {
+				logger.Error("", err)
 			}
+			// TODO - add real values for channel id and channel name once they exist. Maybe just use channel id and rely on a lookup
+			// TODO - debug metrics generation
+			appMetrics.MessagesSentTotal.With(prometheus.Labels{lib.LabelChannelID: "TODO", lib.LabelChannelName: "TODO"}).Inc()
 			err = templatePostChat.Execute(w, nil)
 			if err != nil {
-				fmt.Println(err)
+				logger.Error("", err)
 			}
-		} else {
-			w.WriteHeader(http.StatusBadRequest) // Send 400 for htmx to handle button preservation
-			fmt.Println("Unable to add empty message")
 		}
 	})
 
@@ -270,7 +314,8 @@ func main() {
 	err = http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 	if err != nil {
 		// TODO - panic here
-		logger.Error(err.Error())
+
+		logger.Error("", err) // TODO - wrap this call. Maybe avoid having to leak implementation
 		os.Exit(1)
 	}
 
@@ -294,3 +339,17 @@ type ChatMessage struct {
 // create/join channel button that temporarily modifies the channel window
 
 // TODO - restrict access to api endpoints to JUST htmx (possibly by headers)
+
+// https://github.com/jackc/pgx/blob/master/examples/chat/main.go
+
+// handleTemplateRender is similar to template.Must(), but uses a logger before panic
+func handleTemplateRender(logger *lib.Logger, filenames ...string) *template.Template {
+	var (
+		tmpl *template.Template
+		err  error
+	)
+	if tmpl, err = template.ParseFiles(filenames...); err != nil {
+		logger.Panic("Unable to render template!", err)
+	}
+	return tmpl
+}

@@ -136,3 +136,4 @@ tags
 [._]*.un~
 
 /.env
+/franz-chat
