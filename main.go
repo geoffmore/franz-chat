@@ -5,8 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/IBM/sarama"
-	"github.com/geoffmore/franz-chat/internal/kafka"
 	"github.com/geoffmore/franz-chat/internal/lib"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -76,10 +74,8 @@ func main() {
 	// TODO - is it safe to assume that every endpoint returns an HTML object?
 
 	// Init configs
-	kafkaCfg := kafka.NewKafkaConfig(&kafkaConnection)
 
 	// Initialize stateful connections
-	asyncProducer := kafka.NewAsyncProducer(kafkaCfg) // TODO - there is a bug here
 
 	// TODO - try https://github.com/jackc/pgx/wiki/UUID-Support eventually with google/uuid
 
@@ -168,7 +164,6 @@ func main() {
 		if !ok {
 			// Invalid key and/or blank form message
 		}
-		asyncProducer.ProduceMessage(ctx, &sarama.ProducerMessage{Topic: chatTopic, Value: sarama.StringEncoder(strings.Join(message, ""))})
 		// Write to postgres
 		// Should I generate a UUID on message send (for listen/notify) or should I have postgres send back a uuid on commit?
 		// See https://github.com/jackc/pgx/wiki/Getting-started-with-pgx
@@ -187,7 +182,7 @@ func main() {
 		} else {
 			// TODO - exit early here rather than wrapping everything in this else statement
 
-			if err := pgPool.QueryRow(context.Background(), "INSERT INTO messages VALUES ($1, $2, $3)",
+			if err := pgPool.QueryRow(ctx, "INSERT INTO messages VALUES ($1, $2, $3)",
 				uuid.New().String(),
 				msg,
 				start,
