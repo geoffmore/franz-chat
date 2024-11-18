@@ -2,6 +2,7 @@ package lib
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
@@ -12,13 +13,14 @@ import (
 
 // NOTE - each of Gauge, Counter, Histogram, Summary are all collectors, so they can be registered/unregistered programmatically already
 
-// franzDBStatsCollector inspired by https://github.com/prometheus/client_golang/blob/v1.20.5/prometheus/collectors/dbstats_collector.go#L40
+// franzDBStatsCollector is a prometheus.Collector
 type franzDBStatsCollector struct {
 	conn          *pgxpool.Conn
 	ctx           context.Context
 	usersTotal    *prometheus.Desc
 	channelsTotal *prometheus.Desc
 	messagesTotal *prometheus.Desc
+	// inspired by https://github.com/prometheus/client_golang/blob/v1.20.5/prometheus/collectors/dbstats_collector.go#L40
 }
 
 // Collect implements prometheus.Collector
@@ -88,7 +90,56 @@ func (c *franzDBStatsCollector) getChannelsTotal(ctx context.Context, conn *pgxp
 }
 
 func (c *franzDBStatsCollector) getChannelMessagesTotal(ctx context.Context, conn *pgxpool.Conn) map[string]float64 {
-	_, _ = ctx, conn
-	return map[string]float64{"TODO": 54321}
+	var (
+		i        int
+		channels = make(map[string]float64)
+	)
+	row := conn.QueryRow(ctx, "SELECT count(*) FROM messages;")
+	if err := row.Scan(&i); HandlePGError(err, nil) != nil {
+		log.Err(err)
+		return channels
+	}
+
+	// TODO - use channel uuids instead once the channels feature is added
+	channels["default"] = float64(i)
+	return channels
+
 	// TODO - do a join and make a curry with prometheus
+	/*
+		SELECT uuid from channels
+		INNER JOIN messages ON channels.uuid = messages.channel_uuid;
+	*/
+	// The above query doesn't work because it would omit channels with no messages, which may actually be desirable.
 }
+
+/*
+HandleSessionMetrics attempts to get a session lock and serves metrics if the lock is held.
+By using a session lock, only one instance of an application will do work - regardless of replicas.
+In this case, Prometheus metrics are served only on the lock holder.
+Ideally, this would be a metric on franzDBStatsCollector to simplify the function signature, but then I would need to export that struct
+*/
+func HandleSessionMetrics(ctx context.Context, conn *pgxpool.Conn, logger *Logger, registry *prometheus.Registry, collector prometheus.Collector) {
+	if getLock(ctx, conn) {
+		logger.Debug("PostgreSQL session lock attempted and acquired! Serving additional metrics.")
+		// TODO - register only once to avoid duplicate registration error
+		// Check when trying to register. Ignore AlreadyRegisteredError since registration is being attempted explicitly
+		if err := registry.Register(collector); err != nil && !errors.Is(err, prometheus.AlreadyRegisteredError{
+			ExistingCollector: collector,
+			NewCollector:      collector,
+		}) {
+			logger.Error("", err)
+		}
+	} else {
+		logger.Debug("PostgreSQL session lock attempted and not acquired. No additional metrics served.")
+
+		/* Attempt to unregister collector. In cases where this app starts without a session lock and later gains the lock.
+		Should be a no-op if the collector is not registered
+		*/
+		_ = registry.Unregister(collector)
+	}
+	/* Backoff for lock reconciliation is the responsibility of the calling function. Ideally matches scrape_interval in prometheus
+	It is important to note that the longer the reconciliation period, the more likely and the longer there will be a gap in metrics
+	*/
+}
+
+// TODO - create pgxpoolStatsCollector or use database/sql with pgx driver
