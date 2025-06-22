@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,11 +25,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// TODO - determine how to make this a non-package-scoped variable and maintain use in func bar
+var (
+	templateMessage *template.Template
+)
+
 const (
 	chatTopic           = "chat"
 	appName             = "franz-api"
 	channelMessageLimit = 100
 	defaultChannel      = "general"
+	messagesTable       = "messages"
 
 	defaultLineLimit                  = 20
 	defaultClientChannelMessageBuffer = 20
@@ -68,6 +75,7 @@ func main() {
 	)
 	templatePostChat = handleTemplateRender(logger, "./templates/postChat.html.tmpl")
 	templateGetMessages = handleTemplateRender(logger, "./templates/getMessages.html.tmpl")
+	templateMessage = handleTemplateRender(logger, "./templates/message.html.tmpl")
 
 	// TODO - render index.html with initial template content. This should limit config drift
 
@@ -113,13 +121,6 @@ func main() {
 	// Register default app metrics
 	appMetrics := lib.NewAppMetrics(registry)
 
-	// ??? PG metrics. This may need to be conditionally registered/unregistered
-	/* TODO - there is a bug here. When lib.NewPGMetrics is called, it immediately generates metrics with a default value of 0
-	instead, I want to conditionally generate metrics when a session lock is present. I _could_ curry metrics with a label to be extra safe
-	but that feels weird. Perhaps promauto is not suited for this use case. I'm not sure if I can define pgMetrics without values being rendered
-	The case where a session lock is not present, it is grabbed, and generates metrics works
-	*/
-
 	// Acquire connection for metrics collector
 	foo, err := pgPool.Acquire(context.Background())
 	if err != nil {
@@ -133,11 +134,19 @@ func main() {
 	go func() {
 		for {
 			lib.HandleSessionMetrics(context.Background(), c, logger, registry, franzDBCollector)
-			time.Sleep(60 * time.Second)
+			time.Sleep(10 * time.Second)
 		}
 	}()
 
-	http.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{
+	// Init listen/notify
+	// See https://github.com/jackc/pgx/blob/master/examples/chat/main.go
+	notificationConn, err := pgPool.Acquire(context.Background())
+	if err != nil {
+		logger.Fatal("", err)
+	}
+	go lib.Listen(context.Background(), messagesTable, notificationConn)
+
+	http.Handle("GET /metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{
 		Registry: registry,
 		// ErrorLog: logger, // TODO - add logger here
 	}))
@@ -146,9 +155,13 @@ func main() {
 	// TODO - make sure /static/index.html is distinct from assets
 	// TODO - make index.html into a template and make it composable with its children to prevent runtime modifications
 	// TODO - convert this into a HandlerFunc that correlates all files with the original request
+
+	// https://technology.blog.gov.uk/2013/12/05/building-a-new-router-for-gov-uk/ says I can use https://pkg.go.dev/net/http/httputil#NewSingleHostReverseProxy to rewrite URLs
 	http.Handle("/static/",
 		http.StripPrefix("/static/", http.FileServer(http.Dir("./html"))),
 	)
+
+	http.HandleFunc("/polling", bar)
 
 	http.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
 		var (
@@ -181,14 +194,27 @@ func main() {
 			logger.Warn("Unable to add empty message")
 		} else {
 			// TODO - exit early here rather than wrapping everything in this else statement
+			messageUUID := uuid.New()
 
-			if err := pgPool.QueryRow(ctx, "INSERT INTO messages VALUES ($1, $2, $3)",
-				uuid.New().String(),
+			// Insert message, then notify
+			if err := pgPool.QueryRow(ctx, "INSERT INTO messages VALUES ($1, $2, $3);",
+				messageUUID.String(),
 				msg,
 				start,
 			).Scan(); lib.HandlePGError(err, pgx.ErrNoRows) != nil {
 				logger.Error("", err)
 			}
+
+			// See https://www.postgresql.org/docs/current/sql-notify.html
+			// Notify listeners. This statement cannot be in the same prepared statement according to SQLSTATE 42601.
+			//if err := pgPool.QueryRow(ctx, "SELECT pg_notify('channels', $1);", messageUUID.String()).Scan(); lib.HandlePGError(err, pgx.ErrNoRows) != nil {
+			//if err := pgPool.QueryRow(ctx, "SELECT pg_notify('channels', 'foo');").Scan(); lib.HandlePGError(err, pgx.ErrNoRows) != nil {
+			// Note - Query expects multiple rows, QueryRow expects 1 row, Exec expects no rows
+
+			//if _, err := pgPool.Exec(context.Background(), "pg_notify($1, $2)", messagesTable, messageUUID.String()); err != nil {
+			//	// Do work
+			//}
+
 			// TODO - add real values for channel id and channel name once they exist. Maybe just use channel id and rely on a lookup
 			// TODO - debug metrics generation
 			appMetrics.MessagesSentTotal.With(prometheus.Labels{lib.LabelChannelID: "TODO", lib.LabelChannelName: "TODO"}).Inc()
@@ -222,11 +248,28 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		// TODO - wire this up with HTMX
-		if _, err := w.Write([]byte(strings.Join(channels, `\n`))); err != nil {
+		// Although ["foo"] is valid json, React Promise.json() isn't happy with it, so I wrap the json in a struct here
+		//data, err := json.Marshal(getChannelsResponse{
+		//	Channels: channels,
+		//})
+		if err != nil {
 			fmt.Println(err)
 		}
-
+		// TODO - wire this up with HTMX
+		//if _, err := w.Write(data); err != nil {
+		//	fmt.Println(err)
+		//}
+		w.Header().Set("Content-Type", "application/json")
+		// These two access control headers are necessary when making calls to localhost
+		// TODO - wrap these headers in an env-specific init thing
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+		w.WriteHeader(http.StatusCreated)
+		err = json.NewEncoder(w).Encode(GetMessagesResponse{Channels: channels})
+		if err != nil {
+			fmt.Println(err)
+		}
+		// TODO - figure out what each json handler needs and collect that into a set of common logic
 	})
 
 	http.HandleFunc("/create-channel", func(w http.ResponseWriter, r *http.Request) {
@@ -262,9 +305,6 @@ func main() {
 			}
 		}
 	})
-
-	channelMessages := make(map[string][channelMessageLimit]ChatMessage)
-	_ = channelMessages
 
 	type message struct {
 		Timestamp time.Time // pgtype.Timestamp could be used, but it's more noisy
@@ -319,12 +359,6 @@ func main() {
 
 // Clients should always send html
 
-type ChatMessage struct {
-	Timestamp time.Time
-	User      string
-	Message   string
-}
-
 // Fix button
 // Then, add a channel option
 // Then, add an option to add channels if they don't exist and/or create them
@@ -347,4 +381,48 @@ func handleTemplateRender(logger *lib.Logger, filenames ...string) *template.Tem
 		logger.Panic("Unable to render template!", err)
 	}
 	return tmpl
+}
+
+// TODO - clear chat on click
+// TODO - onload, get channels for default channel and get the latest messages
+
+func bar(w http.ResponseWriter, r *http.Request) {
+	// See https://medium.com/@rian.eka.cahya/server-sent-event-sse-with-go-10592d9c2aa1
+	//w.Header().Set("Access-Control-Allow-Origin", "*")
+	//w.Header().Set("Access-Control-Expose-Headers", "Content-Type")
+
+	//// w.Header().Set("Content-Type", "text/event-stream")
+	//w.Header().Set("Cache-Control", "no-cache")
+	//w.Header().Set("Connection", "keep-alive")
+
+	// Simulate sending events (you can replace this with real data)
+	err := templateMessage.Execute(w, nil)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	//for i := 0; i < 10; i++ {
+	//	time.Sleep(1 * time.Second)
+	//	// w.(http.Flusher).Flush()
+	//}
+
+	// Simulate closing the connection
+	// TODO - replace with request context deadline or something
+	//closeNotify := w.(http.CloseNotifier).CloseNotify()
+	//<-closeNotify
+	//_, _ = w, r
+	//for {
+
+	//}
+	//// TODO - use channels instead
+	//select {}
+	//// close
+}
+
+// https://htmx.org/examples/update-other-content/
+
+// See https://mholt.github.io/json-to-go/ for json -> Go conversion
+
+type GetMessagesResponse struct {
+	Channels []string `json:"channels"`
 }

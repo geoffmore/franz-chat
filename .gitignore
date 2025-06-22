@@ -137,3 +137,5 @@ tags
 
 /.env
 /franz-chat
+
+frontend/node_modules
