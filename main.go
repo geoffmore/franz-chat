@@ -345,6 +345,9 @@ func main() {
 			*/
 		},
 	)
+	http.HandleFunc("/resource", loginDemo(pgPool))
+	// POST /create-user
+	http.HandleFunc("/create-user", createUser(pgPool))
 
 	err = http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 	if err != nil {
@@ -426,3 +429,14 @@ func bar(w http.ResponseWriter, r *http.Request) {
 type GetMessagesResponse struct {
 	Channels []string `json:"channels"`
 }
+
+// Maybe every handler should be wrapped in such a way that it has a know reqeust and response?
+
+/* Get channels
+
+Get a list of channels
+Return them as channel id: name pairs
+Have React work with a scroll bar to show the list of channels. Maybe a diff can be used to avoid sending duplicates
+	Maybe that diff function could be interesting
+	Or maybe that is too much engineering for now
+*/
