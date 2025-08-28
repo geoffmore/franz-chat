@@ -10,6 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/prometheus/client_golang/prometheus"
+	"io"
+	"os/signal"
+
 	// How do I support this uuid natively in PGX. Will this improve performance?
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -51,6 +54,7 @@ func main() {
 		startupTimeout     time.Duration
 		logLevel           string
 	)
+	// TODO - use a FlagSet instead of global flags
 	flag.IntVar(&port, "port", 8008, "Listen port")
 	flag.StringVar(&kafkaConnection, "kafka.connection", "localhost:9092", "Kafka connection string")
 	flag.StringVar(&postgresConnection, "postgres.connection", "postgresql://franz_chat:franz_chat@localhost:5432/franz_chat?application_name=franz_chat", "Postgres connection string")
@@ -63,6 +67,8 @@ func main() {
 		// TODO - determine how to use logger here
 		log.Fatal(err)
 	}
+
+	// TODO - move initialization to NewServer/NewApp/NewService. This should have <Foo>Stores
 
 	// Initialize logger
 	// TODO - define log schema
@@ -150,6 +156,10 @@ func main() {
 		Registry: registry,
 		// ErrorLog: logger, // TODO - add logger here
 	}))
+	// TODO - add a proper mux instead of using the default
+	// Routes added via routes.go
+	addRoutes(pgPool, http.DefaultServeMux)
+
 	// Serve static assets
 	// https://stackoverflow.com/questions/26559557
 	// TODO - make sure /static/index.html is distinct from assets
@@ -208,7 +218,7 @@ func main() {
 			// See https://www.postgresql.org/docs/current/sql-notify.html
 			// Notify listeners. This statement cannot be in the same prepared statement according to SQLSTATE 42601.
 			//if err := pgPool.QueryRow(ctx, "SELECT pg_notify('channels', $1);", messageUUID.String()).Scan(); lib.HandlePGError(err, pgx.ErrNoRows) != nil {
-			//if err := pgPool.QueryRow(ctx, "SELECT pg_notify('channels', 'foo');").Scan(); lib.HandlePGError(err, pgx.ErrNoRows) != nil {
+			//if err := pgPool.QueryRow(ctx, "SELECT pg_notify('channels', 'composeMiddleware');").Scan(); lib.HandlePGError(err, pgx.ErrNoRows) != nil {
 			// Note - Query expects multiple rows, QueryRow expects 1 row, Exec expects no rows
 
 			//if _, err := pgPool.Exec(context.Background(), "pg_notify($1, $2)", messagesTable, messageUUID.String()); err != nil {
@@ -248,7 +258,7 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		// Although ["foo"] is valid json, React Promise.json() isn't happy with it, so I wrap the json in a struct here
+		// Although ["composeMiddleware"] is valid json, React Promise.json() isn't happy with it, so I wrap the json in a struct here
 		//data, err := json.Marshal(getChannelsResponse{
 		//	Channels: channels,
 		//})
@@ -440,3 +450,35 @@ Have React work with a scroll bar to show the list of channels. Maybe a diff can
 	Maybe that diff function could be interesting
 	Or maybe that is too much engineering for now
 */
+
+func run(ctx context.Context, w io.Writer, args []string) error {
+
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
+	// ...
+	return nil // Stub
+}
+
+/*
+func main() {
+	ctx := context.Background()
+	if err := run(ctx, os.Stdout, os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.exit(1)
+	}
+}
+*/
+
+// TODO - shorten the signature so loginDemo can exist in HandleFunc
+func loginDemo(pgPool *pgxpool.Pool) func(http.ResponseWriter, *http.Request) {
+	checkBasicAuth(pgPool) // TODO - refactor
+	return func(w http.ResponseWriter, r *http.Request) {
+		// TODO - write this into an authorizer middleware 'basicAuthorizer' or similar
+		// Read headers
+		withBasicAuth(pgPool, w, r)
+
+		// TODO - only return the rest-api if there isn't an error
+		_, _ = w.Write([]byte("{\"data\": \"resource data\"}\n"))
+
+	}
+}
